@@ -35,6 +35,10 @@ class Station(models.Model):
 
 
 class Measurement(models.Model):
+    class Source(models.TextChoices):
+        SIMULATED = "SIMULATED", "Simulado"
+        IQAIR = "IQAIR", "IQAir"
+
     station = models.ForeignKey(
         Station,
         on_delete=models.CASCADE,
@@ -44,21 +48,56 @@ class Measurement(models.Model):
     recorded_at = models.DateTimeField(
         verbose_name="Fecha y hora de medición",
     )
+
     pm25 = models.FloatField(
+        null=True,
+        blank=True,
         validators=[MinValueValidator(0)],
         verbose_name="PM2.5",
         help_text="Concentración en µg/m³.",
     )
     co = models.FloatField(
+        null=True,
+        blank=True,
         validators=[MinValueValidator(0)],
         verbose_name="CO",
         help_text="Concentración en ppm.",
     )
     o3 = models.FloatField(
+        null=True,
+        blank=True,
         validators=[MinValueValidator(0)],
         verbose_name="O₃",
         help_text="Concentración en ppb.",
     )
+
+    source = models.CharField(
+        max_length=20,
+        choices=Source.choices,
+        default=Source.SIMULATED,
+        verbose_name="Fuente de datos",
+    )
+    aqi_us = models.IntegerField(
+        null=True,
+        blank=True,
+        verbose_name="AQI US",
+    )
+    main_pollutant = models.CharField(
+        max_length=20,
+        blank=True,
+        verbose_name="Contaminante principal",
+    )
+    source_city = models.CharField(
+        max_length=120,
+        blank=True,
+        verbose_name="Ciudad fuente",
+    )
+    source_payload = models.JSONField(
+        null=True,
+        blank=True,
+        verbose_name="Respuesta original de la API",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -74,11 +113,14 @@ class Measurement(models.Model):
                 fields=["-recorded_at"],
                 name="measurement_recorded_time_idx",
             ),
+            models.Index(
+                fields=["source", "-recorded_at"],
+                name="measurement_source_time_idx",
+            ),
         ]
 
     def __str__(self):
         return f"{self.station.name} - {self.recorded_at:%d/%m/%Y %H:%M}"
-
 
 class Alert(models.Model):
     class Pollutant(models.TextChoices):

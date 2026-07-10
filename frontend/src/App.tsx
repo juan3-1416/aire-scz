@@ -2,13 +2,13 @@ import { useState } from "react";
 import { useQuery } from "@apollo/client/react";
 
 import AirQualityMap from "./components/AirQualityMap";
+import HistoricalChart from "./components/HistoricalChart";
 import { GET_INITIAL_DATA } from "./graphql/queries";
-import type {
-  InitialData,
-  Pollutant,
-} from "./types/airQuality";
+import type { InitialData, Pollutant } from "./types/airQuality";
 
 import "./App.css";
+
+type SourceFilter = "ALL" | "SIMULATED" | "IQAIR";
 
 const pollutantLabels: Record<Pollutant, string> = {
   PM25: "PM2.5",
@@ -22,14 +22,20 @@ const pollutantUnits: Record<Pollutant, string> = {
   O3: "ppb",
 };
 
+const sourceFilterLabels: Record<SourceFilter, string> = {
+  ALL: "Todos",
+  SIMULATED: "Simulados",
+  IQAIR: "API real",
+};
+
 function getMeasurementValue(
   pollutant: Pollutant,
   value: {
-    pm25: number;
-    co: number;
-    o3: number;
+    pm25: number | null;
+    co: number | null;
+    o3: number | null;
   },
-) {
+): number | null {
   if (pollutant === "PM25") return value.pm25;
   if (pollutant === "CO") return value.co;
 
@@ -43,12 +49,83 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatNullableValue(
+  value: number | null | undefined,
+  unit: string,
+) {
+  if (value === null || value === undefined) {
+    return "N/D";
+  }
+
+  return `${value.toFixed(2)} ${unit}`;
+}
+
+function estimatePm25FromAqi(aqi: number): number | null {
+  const breakpoints = [
+    { aqiLow: 0, aqiHigh: 50, concLow: 0.0, concHigh: 9.0 },
+    { aqiLow: 51, aqiHigh: 100, concLow: 9.1, concHigh: 35.4 },
+    { aqiLow: 101, aqiHigh: 150, concLow: 35.5, concHigh: 55.4 },
+    { aqiLow: 151, aqiHigh: 200, concLow: 55.5, concHigh: 125.4 },
+    { aqiLow: 201, aqiHigh: 300, concLow: 125.5, concHigh: 225.4 },
+  ];
+
+  const range = breakpoints.find(
+    (item) => aqi >= item.aqiLow && aqi <= item.aqiHigh,
+  );
+
+  if (!range) {
+    return null;
+  }
+
+  const concentration =
+    ((range.concHigh - range.concLow) /
+      (range.aqiHigh - range.aqiLow)) *
+      (aqi - range.aqiLow) +
+    range.concLow;
+
+  return concentration;
+}
+
+function formatPm25Value(measurement: {
+  pm25: number | null;
+  aqiUs: number | null;
+  mainPollutant: string;
+  source: string;
+}) {
+  if (measurement.pm25 !== null && measurement.pm25 !== undefined) {
+    return `${measurement.pm25.toFixed(2)} µg/m³`;
+  }
+
+  const mainPollutant = measurement.mainPollutant?.toUpperCase() ?? "";
+
+  const isIqairPm25 =
+    measurement.source === "IQAIR" &&
+    mainPollutant === "PM2.5" &&
+    measurement.aqiUs !== null &&
+    measurement.aqiUs !== undefined;
+
+  if (isIqairPm25) {
+    const estimatedPm25 = estimatePm25FromAqi(measurement.aqiUs);
+
+    if (estimatedPm25 !== null) {
+      return `${estimatedPm25.toFixed(2)} µg/m³ estimado`;
+    }
+  }
+
+  return "N/D";
+}
+
 function App() {
   const [selectedPollutant, setSelectedPollutant] =
     useState<Pollutant>("PM25");
 
   const [showStations, setShowStations] = useState(true);
   const [showHalo, setShowHalo] = useState(true);
+  const [sourceFilter, setSourceFilter] =
+    useState<SourceFilter>("ALL");
+
+  const [selectedHistoryStationId, setSelectedHistoryStationId] =
+    useState<number | null>(null);
 
   const { data, loading, error, refetch } = useQuery<InitialData>(
     GET_INITIAL_DATA,
@@ -76,14 +153,65 @@ function App() {
   const measurements = data?.latestMeasurements ?? [];
   const alerts = data?.currentAlerts ?? [];
 
-  const values = measurements.map((measurement) =>
-    getMeasurementValue(selectedPollutant, measurement),
+  const displayedMeasurements =
+    sourceFilter === "ALL"
+      ? measurements
+      : measurements.filter(
+          (measurement) => measurement.source === sourceFilter,
+        );
+
+  const displayedStationIds = new Set(
+    displayedMeasurements.map((measurement) => measurement.station.id),
   );
 
+  const displayedStationNames = new Set(
+    displayedMeasurements.map((measurement) => measurement.station.name),
+  );
+
+  const displayedStations = stations.filter((station) =>
+    displayedStationIds.has(station.id),
+  );
+
+  const displayedAlerts =
+    sourceFilter === "ALL"
+      ? alerts
+      : alerts.filter((alert) =>
+          displayedStationNames.has(alert.stationName),
+        );
+
+  const simulatedMeasurements = measurements.filter(
+    (measurement) => measurement.source === "SIMULATED",
+  );
+
+  const simulatedStationOptions = simulatedMeasurements.map(
+    (measurement) => measurement.station,
+  );
+
+  const historyStationId =
+    selectedHistoryStationId ?? simulatedStationOptions[0]?.id ?? null;
+
+  const pollutantValues = displayedMeasurements
+    .map((measurement) =>
+      getMeasurementValue(selectedPollutant, measurement),
+    )
+    .filter((value): value is number => value !== null && value !== undefined);
+
+  const aqiValues = displayedMeasurements
+    .map((measurement) => measurement.aqiUs)
+    .filter((value): value is number => value !== null && value !== undefined);
+
+  const useAqiAverage =
+    pollutantValues.length === 0 &&
+    sourceFilter === "IQAIR" &&
+    aqiValues.length > 0;
+
+  const averageValues = useAqiAverage ? aqiValues : pollutantValues;
+
   const average =
-    values.length > 0
-      ? values.reduce((sum, value) => sum + value, 0) / values.length
-      : 0;
+    averageValues.length > 0
+      ? averageValues.reduce((sum, value) => sum + value, 0) /
+        averageValues.length
+      : null;
 
   return (
     <main className="dashboard">
@@ -94,16 +222,14 @@ function App() {
           <p>Dashboard georreferenciado de calidad del aire</p>
         </div>
 
-        <span className="connection-status">
-          Backend conectado
-        </span>
+        <span className="connection-status">Backend conectado</span>
       </header>
 
       <section className="map-dashboard">
         <div className="map-canvas">
           <AirQualityMap
-            stations={stations}
-            measurements={measurements}
+            stations={displayedStations}
+            measurements={displayedMeasurements}
             pollutant={selectedPollutant}
             showStations={showStations}
             showHalo={showHalo}
@@ -117,11 +243,15 @@ function App() {
           </div>
 
           <div className="main-indicator">
-            <strong>{average.toFixed(1)}</strong>
+            <strong>{average !== null ? average.toFixed(1) : "N/D"}</strong>
             <span>
-              Promedio de {pollutantLabels[selectedPollutant]}
+              {useAqiAverage
+                ? "Promedio AQI US"
+                : `Promedio de ${pollutantLabels[selectedPollutant]}`}
             </span>
-            <small>{pollutantUnits[selectedPollutant]}</small>
+            <small>
+              {useAqiAverage ? "índice" : pollutantUnits[selectedPollutant]}
+            </small>
           </div>
 
           <div className="sidebar-section">
@@ -132,9 +262,7 @@ function App() {
               <select
                 value={selectedPollutant}
                 onChange={(event) =>
-                  setSelectedPollutant(
-                    event.target.value as Pollutant,
-                  )
+                  setSelectedPollutant(event.target.value as Pollutant)
                 }
               >
                 <option value="PM25">PM2.5</option>
@@ -150,6 +278,36 @@ function App() {
                 <option value="urban-zone">Zona urbana</option>
               </select>
             </label>
+          </div>
+
+          <div className="sidebar-section">
+            <h3>Fuente de datos</h3>
+
+            <div className="source-filter">
+              <button
+                type="button"
+                className={sourceFilter === "ALL" ? "active" : ""}
+                onClick={() => setSourceFilter("ALL")}
+              >
+                Todos
+              </button>
+
+              <button
+                type="button"
+                className={sourceFilter === "SIMULATED" ? "active" : ""}
+                onClick={() => setSourceFilter("SIMULATED")}
+              >
+                Simulados
+              </button>
+
+              <button
+                type="button"
+                className={sourceFilter === "IQAIR" ? "active" : ""}
+                onClick={() => setSourceFilter("IQAIR")}
+              >
+                API real
+              </button>
+            </div>
           </div>
 
           <div className="sidebar-section">
@@ -203,9 +361,13 @@ function App() {
           </div>
 
           <div className="sidebar-note">
-            <strong>{stations.length}</strong> estaciones activas
+            <strong>{displayedStations.length}</strong> estaciones visibles
             <br />
-            <strong>{alerts.length}</strong> alertas actuales
+            <strong>{displayedAlerts.length}</strong> alertas visibles
+            <p>
+              Mostrando fuente:{" "}
+              <strong>{sourceFilterLabels[sourceFilter]}</strong>
+            </p>
             <p>
               El halo es una visualización preliminar. La interpolación IDW
               se implementará en la siguiente fase SIG.
@@ -216,18 +378,18 @@ function App() {
 
       <section className="summary-grid">
         <article className="summary-card">
-          <span>Estaciones activas</span>
-          <strong>{stations.length}</strong>
+          <span>Estaciones visibles</span>
+          <strong>{displayedStations.length}</strong>
         </article>
 
         <article className="summary-card">
-          <span>Mediciones actuales</span>
-          <strong>{measurements.length}</strong>
+          <span>Mediciones visibles</span>
+          <strong>{displayedMeasurements.length}</strong>
         </article>
 
         <article className="summary-card">
-          <span>Alertas actuales</span>
-          <strong>{alerts.length}</strong>
+          <span>Alertas visibles</span>
+          <strong>{displayedAlerts.length}</strong>
         </article>
       </section>
 
@@ -243,17 +405,29 @@ function App() {
                 <th>PM2.5</th>
                 <th>CO</th>
                 <th>O₃</th>
+                <th>AQI US</th>
+                <th>Principal</th>
+                <th>Fuente</th>
               </tr>
             </thead>
 
             <tbody>
-              {measurements.map((measurement) => (
+              {displayedMeasurements.map((measurement) => (
                 <tr key={measurement.station.id}>
                   <td>{measurement.station.name}</td>
                   <td>{formatDate(measurement.recordedAt)}</td>
-                  <td>{measurement.pm25.toFixed(2)} µg/m³</td>
-                  <td>{measurement.co.toFixed(2)} ppm</td>
-                  <td>{measurement.o3.toFixed(2)} ppb</td>
+                  <td>{formatPm25Value(measurement)}</td>
+                  <td>{formatNullableValue(measurement.co, "ppm")}</td>
+                  <td>{formatNullableValue(measurement.o3, "ppb")}</td>
+                  <td>{measurement.aqiUs ?? "N/D"}</td>
+                  <td>{measurement.mainPollutant || "N/D"}</td>
+                  <td>
+                    <span
+                      className={`source-badge ${measurement.source.toLowerCase()}`}
+                    >
+                      {measurement.source === "IQAIR" ? "IQAir" : "Simulado"}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -262,13 +436,44 @@ function App() {
       </section>
 
       <section className="panel">
+        <div className="panel-heading-row">
+          <div>
+            <h2>Historial de datos simulados</h2>
+            <p>Serie temporal por estación para PM2.5, CO y O₃.</p>
+          </div>
+
+          <label className="history-selector">
+            Estación
+            <select
+              value={historyStationId ?? ""}
+              onChange={(event) =>
+                setSelectedHistoryStationId(Number(event.target.value))
+              }
+            >
+              {simulatedStationOptions.map((station) => (
+                <option key={station.id} value={station.id}>
+                  {station.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {historyStationId ? (
+          <HistoricalChart stationId={historyStationId} />
+        ) : (
+          <p>No hay estaciones simuladas disponibles.</p>
+        )}
+      </section>
+
+      <section className="panel">
         <h2>Alertas actuales</h2>
 
-        {alerts.length === 0 ? (
-          <p>No hay alertas en las últimas mediciones.</p>
+        {displayedAlerts.length === 0 ? (
+          <p>No hay alertas para la fuente seleccionada.</p>
         ) : (
           <div className="alerts-list">
-            {alerts.map((alert) => (
+            {displayedAlerts.map((alert) => (
               <article
                 className={`alert-card ${alert.level.toLowerCase()}`}
                 key={alert.id}

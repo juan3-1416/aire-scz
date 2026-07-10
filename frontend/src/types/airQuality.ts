@@ -16,9 +16,13 @@ export type LatestMeasurement = {
     zone: string;
   };
   recordedAt: string;
-  pm25: number;
-  co: number;
-  o3: number;
+  pm25: number | null;
+  co: number | null;
+  o3: number | null;
+  source: "SIMULATED" | "IQAIR";
+  sourceLabel: string;
+  aqiUs: number | null;
+  mainPollutant: string;
 };
 
 export type CurrentAlert = {

@@ -33,9 +33,13 @@ class MeasurementType:
     id: int
     station: StationType
     recorded_at: datetime
-    pm25: float
-    co: float
-    o3: float
+    pm25: float | None
+    co: float | None
+    o3: float | None
+    source: str
+    source_label: str
+    aqi_us: int | None
+    main_pollutant: str
 
     @classmethod
     def from_model(cls, measurement: Measurement) -> "MeasurementType":
@@ -46,6 +50,10 @@ class MeasurementType:
             pm25=measurement.pm25,
             co=measurement.co,
             o3=measurement.o3,
+            source=measurement.source,
+            source_label=Measurement.Source(measurement.source).label,
+            aqi_us=measurement.aqi_us,
+            main_pollutant=measurement.main_pollutant,
         )
 
 
@@ -56,7 +64,7 @@ class AlertType:
     station_name: str
     pollutant: str
     level: str
-    value: float
+    value: float | None
     unit: str
     message: str
     recorded_at: datetime

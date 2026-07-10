@@ -52,6 +52,11 @@ def build_alerts_for_measurement(measurement: Measurement) -> list[Alert]:
 
     for pollutant, rule in POLLUTANT_RULES.items():
         value = getattr(measurement, rule["field"])
+
+        # Si la API no devuelve este contaminante, no se genera alerta.
+        if value is None:
+            continue
+
         level = get_alert_level(pollutant, value)
 
         if level is None:

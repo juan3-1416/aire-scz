@@ -28,6 +28,14 @@ type Status = {
   color: string;
 };
 
+type DisplayMetric = {
+  value: number;
+  label: string;
+  unit: string;
+  status: Status;
+  isAqiFallback: boolean;
+};
+
 const SANTA_CRUZ_CENTER: [number, number] = [-17.7833, -63.1821];
 
 const POLLUTANT_META = {
@@ -54,10 +62,20 @@ const POLLUTANT_META = {
 function getPollutantValue(
   measurement: LatestMeasurement,
   pollutant: Pollutant,
-): number {
+): number | null {
   const field = POLLUTANT_META[pollutant].field;
-
   return measurement[field];
+}
+
+function formatNullableValue(
+  value: number | null | undefined,
+  unit: string,
+) {
+  if (value === null || value === undefined) {
+    return "N/D";
+  }
+
+  return `${value.toFixed(2)} ${unit}`;
 }
 
 function getStatus(pollutant: Pollutant, value: number): Status {
@@ -65,7 +83,6 @@ function getStatus(pollutant: Pollutant, value: number): Status {
     if (value >= 150) return { label: "Crítica", color: "#ef4444" };
     if (value >= 55) return { label: "Alta", color: "#f97316" };
     if (value >= 25) return { label: "Moderada", color: "#facc15" };
-
     return { label: "Normal", color: "#22c55e" };
   }
 
@@ -73,15 +90,20 @@ function getStatus(pollutant: Pollutant, value: number): Status {
     if (value >= 15) return { label: "Crítica", color: "#ef4444" };
     if (value >= 9) return { label: "Alta", color: "#f97316" };
     if (value >= 4) return { label: "Moderada", color: "#facc15" };
-
     return { label: "Normal", color: "#22c55e" };
   }
 
   if (value >= 120) return { label: "Crítica", color: "#ef4444" };
   if (value >= 90) return { label: "Alta", color: "#f97316" };
   if (value >= 60) return { label: "Moderada", color: "#facc15" };
-
   return { label: "Normal", color: "#22c55e" };
+}
+
+function getAqiStatus(aqi: number): Status {
+  if (aqi >= 151) return { label: "No saludable", color: "#ef4444" };
+  if (aqi >= 101) return { label: "Alta", color: "#f97316" };
+  if (aqi >= 51) return { label: "Moderada", color: "#facc15" };
+  return { label: "Buena", color: "#22c55e" };
 }
 
 function getHaloRadius(
@@ -92,6 +114,49 @@ function getHaloRadius(
   const normalizedValue = Math.min(value / maxValue, 1);
 
   return 1000 + normalizedValue * 4500;
+}
+
+function getAqiHaloRadius(aqi: number): number {
+  const normalizedValue = Math.min(aqi / 200, 1);
+  return 1000 + normalizedValue * 4500;
+}
+
+function getDisplayMetric(
+  measurement: LatestMeasurement,
+  pollutant: Pollutant,
+): DisplayMetric | null {
+  const meta = POLLUTANT_META[pollutant];
+  const pollutantValue = getPollutantValue(measurement, pollutant);
+
+  if (pollutantValue !== null && pollutantValue !== undefined) {
+    return {
+      value: pollutantValue,
+      label: meta.label,
+      unit: meta.unit,
+      status: getStatus(pollutant, pollutantValue),
+      isAqiFallback: false,
+    };
+  }
+
+  if (measurement.aqiUs !== null && measurement.aqiUs !== undefined) {
+    return {
+      value: measurement.aqiUs,
+      label: "AQI US",
+      unit: "índice",
+      status: getAqiStatus(measurement.aqiUs),
+      isAqiFallback: true,
+    };
+  }
+
+  return null;
+}
+
+function getSourceLabel(measurement: LatestMeasurement) {
+  if (measurement.source === "IQAIR") {
+    return "Dato real IQAir";
+  }
+
+  return "Dato simulado";
 }
 
 export default function AirQualityMap({
@@ -108,8 +173,6 @@ export default function AirQualityMap({
     ]),
   );
 
-  const meta = POLLUTANT_META[pollutant];
-
   return (
     <div className="air-quality-map">
       <MapContainer
@@ -120,7 +183,7 @@ export default function AirQualityMap({
       >
         <TileLayer
           attribution="&copy; OpenStreetMap contributors &copy; CARTO"
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
         />
 
         {stations.map((station) => {
@@ -130,9 +193,15 @@ export default function AirQualityMap({
             return null;
           }
 
-          const value = getPollutantValue(measurement, pollutant);
-          const status = getStatus(pollutant, value);
-          const haloRadius = getHaloRadius(pollutant, value);
+          const displayMetric = getDisplayMetric(measurement, pollutant);
+
+          if (!displayMetric) {
+            return null;
+          }
+
+          const haloRadius = displayMetric.isAqiFallback
+            ? getAqiHaloRadius(displayMetric.value)
+            : getHaloRadius(pollutant, displayMetric.value);
 
           const position: [number, number] = [
             station.latitude,
@@ -147,8 +216,8 @@ export default function AirQualityMap({
                     center={position}
                     radius={haloRadius * 1.8}
                     pathOptions={{
-                      color: status.color,
-                      fillColor: status.color,
+                      color: displayMetric.status.color,
+                      fillColor: displayMetric.status.color,
                       fillOpacity: 0.035,
                       weight: 0,
                     }}
@@ -158,8 +227,8 @@ export default function AirQualityMap({
                     center={position}
                     radius={haloRadius}
                     pathOptions={{
-                      color: status.color,
-                      fillColor: status.color,
+                      color: displayMetric.status.color,
+                      fillColor: displayMetric.status.color,
                       fillOpacity: 0.1,
                       weight: 0,
                     }}
@@ -173,7 +242,7 @@ export default function AirQualityMap({
                   radius={9}
                   pathOptions={{
                     color: "#ffffff",
-                    fillColor: status.color,
+                    fillColor: displayMetric.status.color,
                     fillOpacity: 1,
                     weight: 2,
                   }}
@@ -183,15 +252,51 @@ export default function AirQualityMap({
                       <h3>{station.name}</h3>
                       <p>{station.zone}</p>
 
-                      <strong style={{ color: status.color }}>
-                        {status.label}: {value.toFixed(2)} {meta.unit}
+                      <strong style={{ color: displayMetric.status.color }}>
+                        {displayMetric.status.label}:{" "}
+                        {displayMetric.value.toFixed(2)}{" "}
+                        {displayMetric.unit}
                       </strong>
+
+                      {displayMetric.isAqiFallback && (
+                        <p>
+                          No hay concentración específica disponible para el
+                          contaminante seleccionado. Se muestra AQI US.
+                        </p>
+                      )}
 
                       <hr />
 
-                      <p>PM2.5: {measurement.pm25.toFixed(2)} µg/m³</p>
-                      <p>CO: {measurement.co.toFixed(2)} ppm</p>
-                      <p>O₃: {measurement.o3.toFixed(2)} ppb</p>
+                      <p>
+                        PM2.5:{" "}
+                        {formatNullableValue(measurement.pm25, "µg/m³")}
+                      </p>
+                      <p>
+                        CO: {formatNullableValue(measurement.co, "ppm")}
+                      </p>
+                      <p>
+                        O₃: {formatNullableValue(measurement.o3, "ppb")}
+                      </p>
+
+                      <hr />
+
+                      <p>
+                        <strong>Fuente:</strong> {getSourceLabel(measurement)}
+                      </p>
+
+                      {measurement.aqiUs !== null &&
+                        measurement.aqiUs !== undefined && (
+                          <p>
+                            <strong>AQI US:</strong> {measurement.aqiUs}
+                          </p>
+                        )}
+
+                      {measurement.mainPollutant && (
+                        <p>
+                          <strong>Contaminante principal:</strong>{" "}
+                          {measurement.mainPollutant}
+                        </p>
+                      )}
                     </div>
                   </Popup>
                 </CircleMarker>

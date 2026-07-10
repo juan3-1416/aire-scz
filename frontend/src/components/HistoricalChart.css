@@ -1,0 +1,21 @@
+.historical-chart {
+  width: 100%;
+  padding-top: 12px;
+}
+
+.historical-chart .recharts-cartesian-grid line {
+  stroke: rgba(140, 170, 200, 0.18);
+}
+
+.historical-chart .recharts-text {
+  fill: #b7cce5;
+  font-size: 0.78rem;
+}
+
+.historical-chart .recharts-legend-item-text {
+  color: #d8e7f8 !important;
+}
+
+.historical-chart .recharts-tooltip-wrapper {
+  outline: none;
+}
