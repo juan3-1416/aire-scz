@@ -130,7 +130,7 @@ function App() {
   const [selectedHistoryStationId, setSelectedHistoryStationId] =
     useState<number | null>(null);
 
-  const [historyDays, setHistoryDays] = useState(30);
+  const [historyDays, setHistoryDays] = useState(60);
 
   const { data, loading, error, refetch } = useQuery<InitialData>(
     GET_INITIAL_DATA,
@@ -336,30 +336,6 @@ function App() {
           </div>
 
           <div className="sidebar-section">
-            <h3>Actualizar datos reales</h3>
-
-            <button
-              type="button"
-              className="sync-api-button"
-              onClick={handleSyncIqair}
-              disabled={syncingIqair}
-            >
-              {syncingIqair ? "Actualizando..." : "Actualizar API real"}
-            </button>
-
-            <p className="sync-api-help">
-              Consulta IQAir, guarda la nueva medición en PostgreSQL y refresca
-              el dashboard.
-            </p>
-
-            {syncIqairError && (
-              <p className="sync-api-error">
-                Error: {syncIqairError.message}
-              </p>
-            )}
-          </div>
-
-          <div className="sidebar-section">
             <h3>Capas visuales</h3>
 
             <label className="checkbox-label">
@@ -383,6 +359,25 @@ function App() {
               />
               Halo de concentración
             </label>
+          </div>
+
+          <div className="sidebar-section">
+            <h3>Actualizar datos reales</h3>
+
+            <button
+              type="button"
+              className="sync-api-button"
+              onClick={handleSyncIqair}
+              disabled={syncingIqair}
+            >
+              {syncingIqair ? "Actualizando..." : "Actualizar API real"}
+            </button>
+
+            {syncIqairError && (
+              <p className="sync-api-error">
+                Error: {syncIqairError.message}
+              </p>
+            )}
           </div>
 
           <div className="sidebar-section">
