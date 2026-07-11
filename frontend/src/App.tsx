@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { useQuery } from "@apollo/client/react";
+import { useMutation, useQuery } from "@apollo/client/react";
 
 import AirQualityMap from "./components/AirQualityMap";
 import HistoricalChart from "./components/HistoricalChart";
-import { GET_INITIAL_DATA } from "./graphql/queries";
+import {
+  GET_INITIAL_DATA,
+  SYNC_IQAIR,
+} from "./graphql/queries";
 import type { InitialData, Pollutant } from "./types/airQuality";
 
 import "./App.css";
@@ -127,9 +130,31 @@ function App() {
   const [selectedHistoryStationId, setSelectedHistoryStationId] =
     useState<number | null>(null);
 
+  const [historyDays, setHistoryDays] = useState(30);
+
   const { data, loading, error, refetch } = useQuery<InitialData>(
     GET_INITIAL_DATA,
   );
+
+  const [
+    syncIqair,
+    {
+      loading: syncingIqair,
+      error: syncIqairError,
+    },
+  ] = useMutation(SYNC_IQAIR, {
+    refetchQueries: [{ query: GET_INITIAL_DATA }],
+    awaitRefetchQueries: true,
+  });
+
+  async function handleSyncIqair() {
+    try {
+      await syncIqair();
+      setSourceFilter("IQAIR");
+    } catch {
+      // Apollo ya expone el error en syncIqairError.
+    }
+  }
 
   if (loading) {
     return (
@@ -311,6 +336,30 @@ function App() {
           </div>
 
           <div className="sidebar-section">
+            <h3>Actualizar datos reales</h3>
+
+            <button
+              type="button"
+              className="sync-api-button"
+              onClick={handleSyncIqair}
+              disabled={syncingIqair}
+            >
+              {syncingIqair ? "Actualizando..." : "Actualizar API real"}
+            </button>
+
+            <p className="sync-api-help">
+              Consulta IQAir, guarda la nueva medición en PostgreSQL y refresca
+              el dashboard.
+            </p>
+
+            {syncIqairError && (
+              <p className="sync-api-error">
+                Error: {syncIqairError.message}
+              </p>
+            )}
+          </div>
+
+          <div className="sidebar-section">
             <h3>Capas visuales</h3>
 
             <label className="checkbox-label">
@@ -439,28 +488,52 @@ function App() {
         <div className="panel-heading-row">
           <div>
             <h2>Historial de datos simulados</h2>
-            <p>Serie temporal por estación para PM2.5, CO y O₃.</p>
+            <p>
+              Serie temporal por estación para PM2.5, CO y O₃. Puedes ajustar
+              el rango de días para revisar datos recientes.
+            </p>
           </div>
 
-          <label className="history-selector">
-            Estación
-            <select
-              value={historyStationId ?? ""}
-              onChange={(event) =>
-                setSelectedHistoryStationId(Number(event.target.value))
-              }
-            >
-              {simulatedStationOptions.map((station) => (
-                <option key={station.id} value={station.id}>
-                  {station.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="history-controls">
+            <label className="history-selector">
+              Estación
+              <select
+                value={historyStationId ?? ""}
+                onChange={(event) =>
+                  setSelectedHistoryStationId(Number(event.target.value))
+                }
+              >
+                {simulatedStationOptions.map((station) => (
+                  <option key={station.id} value={station.id}>
+                    {station.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="history-selector">
+              Rango
+              <select
+                value={historyDays}
+                onChange={(event) =>
+                  setHistoryDays(Number(event.target.value))
+                }
+              >
+                <option value={7}>Últimos 7 días</option>
+                <option value={15}>Últimos 15 días</option>
+                <option value={30}>Últimos 30 días</option>
+                <option value={60}>Últimos 60 días</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         {historyStationId ? (
-          <HistoricalChart stationId={historyStationId} />
+          <HistoricalChart
+            key={`${historyStationId}-${historyDays}`}
+            stationId={historyStationId}
+            days={historyDays}
+          />
         ) : (
           <p>No hay estaciones simuladas disponibles.</p>
         )}

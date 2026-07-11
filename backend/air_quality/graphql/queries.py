@@ -53,6 +53,7 @@ class Query:
         station_id: int,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
+        source: str | None = None,
         limit: int = 2000,
     ) -> list[MeasurementType]:
         safe_limit = max(1, min(limit, 5000))
@@ -61,17 +62,26 @@ class Query:
             station_id=station_id
         )
 
+        if source:
+            queryset = queryset.filter(source=source.upper())
+
         if start_date:
             queryset = queryset.filter(recorded_at__gte=start_date)
 
         if end_date:
             queryset = queryset.filter(recorded_at__lte=end_date)
 
-        queryset = queryset.order_by("recorded_at")[:safe_limit]
+        if start_date or end_date:
+            queryset = queryset.order_by("recorded_at")[:safe_limit]
+            measurements = list(queryset)
+        else:
+            queryset = queryset.order_by("-recorded_at")[:safe_limit]
+            measurements = list(queryset)
+            measurements.reverse()
 
         return [
             MeasurementType.from_model(measurement)
-            for measurement in queryset
+            for measurement in measurements
         ]
 
     @strawberry.field
